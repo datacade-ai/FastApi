@@ -95,24 +95,26 @@ async def process_text(request: Request):
     """
     Accepts JSON input with `text` and generates a chatbot response.
     """
-    try:
-        body = await request.json()
-        text = body.get("text")
-        if not text:
-            raise HTTPException(status_code=400, detail="No text provided.")
+    # try:
+    #     body = await request.json()
+    #     text = body.get("text")
+    #     if not text:
+    #         raise HTTPException(status_code=400, detail="No text provided.")
 
-        # Load and preprocess the PDF context only once (consider caching for optimization)
-        if not os.path.exists(PDF_FILE_PATH):
-            raise HTTPException(status_code=500, detail=f"PDF file '{PDF_FILE_PATH}' not found.")
+    #     # Load and preprocess the PDF context only once (consider caching for optimization)
+    #     if not os.path.exists(PDF_FILE_PATH):
+    #         raise HTTPException(status_code=500, detail=f"PDF file '{PDF_FILE_PATH}' not found.")
         
-        pdf_text = extract_text_from_pdf(PDF_FILE_PATH)
-        chunks = preprocess_text(pdf_text)
+    #     pdf_text = extract_text_from_pdf(PDF_FILE_PATH)
+    #     chunks = preprocess_text(pdf_text)
 
-        # Generate a chatbot response based on the input text
-        chatbot_response = generate_response(text, chunks)
+    #     # Generate a chatbot response based on the input text
+    #     chatbot_response = generate_response(text, chunks)
 
         # Return the chatbot response
-        return JSONResponse(content={"response": chatbot_response})
+        # return JSONResponse(content={"response": chatbot_response})
+    return {"response": "Simplified response to test deployment"}
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    # except Exception as e:
+    #     raise HTTPException(status_code=500, detail=str(e))
