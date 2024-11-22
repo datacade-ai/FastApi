@@ -2,7 +2,6 @@ fastapi
 uvicorn
 requests
 PyPDF2
-pyaudio
 sentence-transformers
 openai
 nltk
