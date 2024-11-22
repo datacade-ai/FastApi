@@ -72,9 +72,9 @@ def generate_response(query, chunks):
     """Generates a chatbot response using OpenAI."""
     if query.lower() in ["exit", "bye"]:
         return "Thank you for using the service. Goodbye!"
-    print(query)
+    # print(query)
     selected_chunk = find_relevant_chunk(query, chunks)
-    print(selected_chunk)
+    # print(selected_chunk)
     prompt = f"Context: {selected_chunk}\n\nUser: {query}\nChatbot:"
     try:
         response = openai.ChatCompletion.create(
