@@ -1,93 +1,70 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 import os
-import nltk
 import openai
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
+from pinecone import Pinecone
 from dotenv import load_dotenv
-import PyPDF2
+import logging
+import requests
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPEN_API_KEY")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+pinecone_api_key = os.getenv("PINECONE_API_KEY")
+index_name = os.getenv("PINECONE_INDEX_NAME")
 
-# Download NLTK data
-nltk.download('punkt')
+# Initialize Pinecone
+pc = Pinecone(api_key=pinecone_api_key)
+index = pc.Index(index_name)
 
 # Initialize FastAPI
 app = FastAPI()
 
-# Load SentenceTransformer model
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-
-# Constants
-TOKEN_LIMIT = 200
-PDF_FILE_PATH = "countries.pdf"  # Replace this with your PDF file path
-
-def extract_text_from_pdf(file_path):
-    """Extracts text from a PDF file."""
+def find_relevant_chunk(query: str):
+    """Finds the most relevant chunk using embeddings from Pinecone."""
+    # Generate the embedding using OpenAI's model
     try:
-        text = ""
-        with open(file_path, 'rb') as file:
-            reader = PyPDF2.PdfReader(file)
-            for page in reader.pages:
-                text += page.extract_text() or ""
-        return text
+        response = openai.Embedding.create(
+            input=query,
+            model="text-embedding-ada-002",
+            api_key=openai_api_key  # Make sure to explicitly pass the API key
+        )
+        query_embedding = response['data'][0]['embedding']
+        query_results = index.query(vector=query_embedding, top_k=1)
+        match = query_results['matches'][0]
+        return match.get('metadata', {}).get('text', 'No text available')
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading PDF: {e}")
+        logger.error(f"Error generating embeddings or querying Pinecone: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve relevant data.")
 
-def preprocess_text(text, token_limit=TOKEN_LIMIT, overlap=2):
-    """Tokenizes and chunks text."""
-    sentences = nltk.sent_tokenize(text)
-    chunks = []
-    current_chunk = []
-    current_chunk_size = 0
+import google.generativeai as genai
 
-    for sentence in sentences:
-        sentence_length = len(nltk.word_tokenize(sentence))
-        if current_chunk_size + sentence_length > token_limit:
-            chunks.append(" ".join(current_chunk))
-            current_chunk = current_chunk[-overlap:] + [sentence]
-            current_chunk_size = sum(len(nltk.word_tokenize(sent)) for sent in current_chunk)
-        else:
-            current_chunk.append(sentence)
-            current_chunk_size += sentence_length
+# Configure the Gemini API key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-    if current_chunk:
-        chunks.append(" ".join(current_chunk))
-    return chunks
-
-def find_relevant_chunk(query, chunks):
-    """Finds the most relevant chunk using cosine similarity."""
-    query_embedding = embedding_model.encode([query])
-    chunk_embeddings = embedding_model.encode(chunks)
-
-    similarities = cosine_similarity(query_embedding, chunk_embeddings).flatten()
-    most_relevant_chunk_index = np.argmax(similarities)
-    return chunks[most_relevant_chunk_index]
-
-def generate_response(query, chunks):
-    """Generates a chatbot response using OpenAI."""
+def generate_response(query: str):
+    """Generates a chatbot response using Google's Gemini API."""
     if query.lower() in ["exit", "bye"]:
         return "Thank you for using the service. Goodbye!"
-    # print(query)
-    selected_chunk = find_relevant_chunk(query, chunks)
-    # print(selected_chunk)
+
+    # Find the most relevant chunk
+    selected_chunk = find_relevant_chunk(query)
     prompt = f"Context: {selected_chunk}\n\nUser: {query}\nChatbot:"
+
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=150,
-            temperature=0.7
-        )
-        return response['choices'][0]['message']['content'].strip()
+        # Initialize the generative model
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        
+        # Generate content using the prompt
+        response = model.generate_content(prompt)
+        
+        # Extract and return the generated content
+        return response.text.strip()
+    
     except Exception as e:
+        logger.error(f"Error generating response from Gemini API: {e}")
         raise HTTPException(status_code=500, detail=f"Error generating response: {e}")
 
 @app.post("/process-text/")
@@ -101,18 +78,11 @@ async def process_text(request: Request):
         if not text:
             raise HTTPException(status_code=400, detail="No text provided.")
 
-        # Load and preprocess the PDF context only once (consider caching for optimization)
-        if not os.path.exists(PDF_FILE_PATH):
-            raise HTTPException(status_code=500, detail=f"PDF file '{PDF_FILE_PATH}' not found.")
-        
-        pdf_text = extract_text_from_pdf(PDF_FILE_PATH)
-        chunks = preprocess_text(pdf_text)
+        # Generate chatbot response
+        chatbot_response = generate_response(text)
 
-        # Generate a chatbot response based on the input text
-        chatbot_response = generate_response(text, chunks)
-
-        # Return the chatbot response
         return JSONResponse(content={"response": chatbot_response})
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error processing request: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)) 
