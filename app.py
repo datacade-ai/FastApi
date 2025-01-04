@@ -5,7 +5,7 @@ import openai
 from pinecone import Pinecone
 from dotenv import load_dotenv
 import logging
-import requests
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,9 @@ index_name = os.getenv("PINECONE_INDEX_NAME")
 pc = Pinecone(api_key=pinecone_api_key)
 index = pc.Index(index_name)
 
+# Configure the Gemini API key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
 # Initialize FastAPI
 app = FastAPI()
 
@@ -29,38 +32,30 @@ def find_relevant_chunk(query: str):
         response = openai.Embedding.create(
             input=query,
             model="text-embedding-ada-002",
-            api_key=openai_api_key  # Make sure to explicitly pass the API key
+            api_key=openai_api_key  
         )
         query_embedding = response['data'][0]['embedding']
+        print(f"Generated Embeddings: {query_embedding}")
         query_results = index.query(vector=query_embedding, top_k=1)
+        print(f"Pinecone Query Results: {query_results}")
         match = query_results['matches'][0]
         return match.get('metadata', {}).get('text', 'No text available')
     except Exception as e:
         logger.error(f"Error generating embeddings or querying Pinecone: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve relevant data.")
 
-import google.generativeai as genai
-
-# Configure the Gemini API key
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
 def generate_response(query: str):
     """Generates a chatbot response using Google's Gemini API."""
     if query.lower() in ["exit", "bye"]:
         return "Thank you for using the service. Goodbye!"
 
-    # Find the most relevant chunk
     selected_chunk = find_relevant_chunk(query)
+    print(selected_chunk)
     prompt = f"Context: {selected_chunk}\n\nUser: {query}\nChatbot:"
 
     try:
-        # Initialize the generative model
         model = genai.GenerativeModel("gemini-1.5-flash")
-        
-        # Generate content using the prompt
         response = model.generate_content(prompt)
-        
-        # Extract and return the generated content
         return response.text.strip()
     
     except Exception as e:
@@ -78,9 +73,7 @@ async def process_text(request: Request):
         if not text:
             raise HTTPException(status_code=400, detail="No text provided.")
 
-        # Generate chatbot response
         chatbot_response = generate_response(text)
-
         return JSONResponse(content={"response": chatbot_response})
 
     except Exception as e:
